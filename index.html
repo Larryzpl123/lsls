@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Searchable Course Table</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      padding: 20px;
+      background-color: #f1f1f1;
+    }
+    h1 {
+      text-align: center;
+      margin-bottom: 20px;
+    }
+    .container {
+      max-width: 1000px;
+      margin: 0 auto;
+    }
+    .search-container {
+      display: flex;
+      flex-direction: column;
+      gap: 15px;
+      width: 100%;
+      margin-bottom: 20px;
+    }
+    .search-container input {
+      padding: 8px;
+      font-size: 1rem;
+      width: 100%;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background-color: #fff;
+    }
+    th,
+    td {
+      padding: 10px;
+      text-align: left;
+      border-bottom: 1px solid #ddd;
+    }
+    th {
+      cursor: pointer;
+      background-color: #e7e7e7;
+      user-select: none;
+    }
+    th.sort-asc::after {
+      content: ' ▲';
+    }
+    th.sort-desc::after {
+      content: ' ▼';
+    }
+    tr:hover {
+      background-color: #f9f9f9;
+    }
+    @media (max-width: 600px) {
+      .search-container input {
+        width: 100%;
+      }
+      th,
+      td {
+        padding: 8px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Course Catalog</h1>
+
+    <div class="search-container">
+      <input type="text" id="searchName" placeholder="Course Name">
+      <input type="text" id="searchSubject" placeholder="Subject">
+      <input type="text" id="searchCourseNumber" placeholder="Course Number (supports -s- patterns)">
+      <input type="text" id="searchProvider" placeholder="Provider">
+      <input type="text" id="searchLength" placeholder="Length (credit or index (1 = 1000), 1/8 or 125)">
+    </div>
+
+    <table id="courseTable">
+      <thead>
+        <tr>
+          <th data-column="no">No</th>
+          <th data-column="courseName">Course Name</th>
+          <th data-column="subject">Subject</th>
+          <th data-column="courseNumber">Course Number</th>
+          <th data-column="provider">Provider</th>
+          <th data-column="length">Length</th>
+        </tr>
+      </thead>
+      <tbody>
+        <!-- Table rows will be inserted here -->
+      </tbody>
+    </table>
+  </div>
+
+  <script>
+    let courses = [];
+    let filteredCourses = [];
+    // current sort state
+    let sortColumn = "courseNumber"; // default sort by course number
+    let sortDir = "asc";
+
+    // fetch and parse the courselist.txt file
+    fetch("courselist.txt")
+      .then(response => response.text())
+      .then(data => {
+        courses = parseCourseData(data);
+        // initial sort
+        sortCourses(sortColumn, sortDir);
+        filteredCourses = courses;
+        renderTable(filteredCourses);
+      })
+      .catch(err => {
+        console.error("Error loading course data:", err);
+      });
+
+    /**
+     * Expected format for each course:
+     * Field separators: comma (,) separates fields.
+     * A semicolon (;) inside a field indicates a line-break or a two-part value.
+     * Each course entry is ended with a period ('.').
+     *
+     * For example:
+     * 1, Foundations of Literature I, English ; Writing, EN101, SSA ; Shady Side Academy, 1/8 ; 0.125.
+     *
+     * This parser splits on period first (ignoring empty lines) then on commas.
+     * For fields that include a semicolon, we split further.
+     */
+    function parseCourseData(text) {
+      let courseArray = [];
+      // Remove any newline characters and trim spaces.
+      text = text.replace(/\r?\n/g, " ");
+      // Split on period. Each course ends with a period.
+      let entries = text.split(".").map(e => e.trim()).filter(e => e !== "");
+      entries.forEach(entry => {
+        // Split into fields by comma.
+        let parts = entry.split(",").map(part => part.trim());
+        if (parts.length < 6) return; // ensure we have at least six fields
+
+        // Fields: No, Course Name, Subject, Course Number, Provider, Length.
+        let course = {
+          no: parts[0],
+          courseName: parts[1],
+          // For subject, provider and length, check for a semicolon separator.
+          subject: splitField(parts[2]),
+          courseNumber: parts[3],
+          provider: splitField(parts[4]),
+          length: splitField(parts[5])
+        };
+
+        // If there are additional parts (e.g. if length was split into two parts because of comma),
+        // check if they are available and assign correctly.
+        if (parts.length >= 7 && !course.length.second) {
+          // In some courses, the length field might have been split in two:
+          // e.g.: "1/8" and "0.125" come as parts[5] and parts[6]
+          course.length.second = parts[6];
+        }
+        courseArray.push(course);
+      });
+      return courseArray;
+    }
+
+    // Helper: split a field on semicolon if exists.
+    // Returns an object { first: "value", second: "value" } if two parts exist, else { first: "value" }.
+    function splitField(field) {
+      let parts = field.split(";").map(p => p.trim());
+      if (parts.length >= 2) {
+        return { first: parts[0], second: parts[1] };
+      } else {
+        return { first: field };
+      }
+    }
+
+    // Renders the table body based on a given courses array.
+    function renderTable(courseArray) {
+      const tbody = document.querySelector("#courseTable tbody");
+      tbody.innerHTML = "";
+      courseArray.forEach(course => {
+        const tr = document.createElement("tr");
+
+        // Column: No
+        let tdNo = document.createElement("td");
+        tdNo.textContent = course.no;
+        tr.appendChild(tdNo);
+
+        // Column: Course Name - create clickable link based on the courseNumber folder.
+        let tdName = document.createElement("td");
+        let a = document.createElement("a");
+        a.textContent = course.courseName;
+        a.href = `${course.courseNumber}/index.html`;
+        a.style.textDecoration = "none";
+        a.style.color = "#0077cc";
+        tdName.appendChild(a);
+        tr.appendChild(tdName);
+
+        // Column: Subject - show as "abbr / full" if second exists.
+        let tdSubject = document.createElement("td");
+        tdSubject.textContent = course.subject.second
+          ? course.subject.first + " - " + course.subject.second
+          : course.subject.first;
+        tr.appendChild(tdSubject);
+
+        // Column: Course Number
+        let tdCourseNumber = document.createElement("td");
+        tdCourseNumber.textContent = course.courseNumber;
+        tr.appendChild(tdCourseNumber);
+
+        // Column: Provider - show as "abbr / full" if second exists.
+        let tdProvider = document.createElement("td");
+        tdProvider.textContent = course.provider.second
+          ? course.provider.first + " - " + course.provider.second
+          : course.provider.first;
+        tr.appendChild(tdProvider);
+
+        // Column: Length - show as "credit / index" if second exists.
+        let tdLength = document.createElement("td");
+        tdLength.textContent = course.length.second
+          ? course.length.first + " (" + course.length.second + ")"
+          : course.length.first;
+        tr.appendChild(tdLength);
+
+        tbody.appendChild(tr);
+      });
+    }
+
+    // Filtering function: called on input search changes.
+    function filterCourses() {
+      const nameFilter = document.getElementById("searchName").value.trim().toLowerCase();
+      const subjectFilter = document.getElementById("searchSubject").value.trim().toLowerCase();
+      const courseNumberFilter = document.getElementById("searchCourseNumber").value.trim();
+      const providerFilter = document.getElementById("searchProvider").value.trim().toLowerCase();
+      const lengthFilter = document.getElementById("searchLength").value.trim().toLowerCase();
+      
+      filteredCourses = courses.filter(course => {
+        // Course Name filter (contains)
+        if (nameFilter && !course.courseName.toLowerCase().includes(nameFilter)) {
+          return false;
+        }
+
+        // Subject filter: check both parts if available.
+        let subjectCombined = (course.subject.first + " " + (course.subject.second || "")).toLowerCase();
+        if (subjectFilter && !subjectCombined.includes(subjectFilter)) {
+          return false;
+        }
+
+        // Course Number filter - special pattern recognition.
+        if (courseNumberFilter) {
+          let cn = course.courseNumber;
+          if (/^[^-].*--$/.test(courseNumberFilter)) {
+            // e.g. "4--" : search for course numbers that start with the given text (remove trailing dashes).
+            let searchText = courseNumberFilter.replace(/-+$/, "");
+            if (!cn.startsWith(searchText)) return false;
+          } else if (/^--.+[^-]$/.test(courseNumberFilter)) {
+            // e.g. "--4": search for course numbers that end with the given text.
+            let searchText = courseNumberFilter.replace(/^-+/, "");
+            if (!cn.endsWith(searchText)) return false;
+          } else if (/^-.+-$/.test(courseNumberFilter)) {
+            // e.g. "-4-": search for course numbers with the given text in the middle (exclude beginning/end).
+            let searchText = courseNumberFilter.replace(/^-|-$|-/g, "");
+            // Ensure the text is contained somewhere in the middle.
+            if (cn.indexOf(searchText) === -1 ||
+                cn.startsWith(searchText) ||
+                cn.endsWith(searchText)) {
+              return false;
+            }
+          } else {
+            // Default: check if course number includes the filter string.
+            if (!cn.toLowerCase().includes(courseNumberFilter.toLowerCase())) return false;
+          }
+        }
+
+        // Provider filter: check both parts.
+        let providerCombined = (course.provider.first + " " + (course.provider.second || "")).toLowerCase();
+        if (providerFilter && !providerCombined.includes(providerFilter)) {
+          return false;
+        }
+
+        // Length filter: check if the filter text is contained in either the credit (first) or the index (second).
+        let lengthCombined = (course.length.first + " " + (course.length.second || "")).toLowerCase();
+        if (lengthFilter && !lengthCombined.includes(lengthFilter)) {
+          return false;
+        }
+        return true;
+      });
+      // After filter, sort then render.
+      sortCourses(sortColumn, sortDir);
+      renderTable(filteredCourses);
+    }
+    
+    // Attach event listeners to search boxes
+    document.querySelectorAll(".search-container input").forEach(input => {
+      input.addEventListener("input", filterCourses);
+    });
+
+    // Sorting function: sorts filteredCourses based on a given column name.
+    function sortCourses(column, direction) {
+      filteredCourses.sort((a, b) => {
+        let aVal, bVal;
+        switch (column) {
+          case "no":
+            // numerical sort
+            aVal = parseInt(a.no, 10);
+            bVal = parseInt(b.no, 10);
+            break;
+          case "courseName":
+            aVal = a.courseName.toLowerCase();
+            bVal = b.courseName.toLowerCase();
+            break;
+          case "subject":
+            // Compare using concatenation of both subject parts
+            aVal = (a.subject.second ? a.subject.second : a.subject.first).toLowerCase();
+            bVal = (b.subject.second ? b.subject.second : b.subject.first).toLowerCase();
+            break;
+          case "courseNumber":
+            aVal = a.courseNumber.toLowerCase();
+            bVal = b.courseNumber.toLowerCase();
+            break;
+          case "provider":
+            aVal = a.provider.first.toLowerCase() + " " + (a.provider.second || "").toLowerCase();
+            bVal = b.provider.first.toLowerCase() + " " + (b.provider.second || "").toLowerCase();
+            break;
+          case "length":
+            aVal = parseFloat(a.length.second) || 0;
+            bVal = parseFloat(b.length.second) || 0;
+            break;
+          default:
+            aVal = "";
+            bVal = "";
+        }
+        if (aVal < bVal) return direction === "asc" ? -1 : 1;
+        if (aVal > bVal) return direction === "asc" ? 1 : -1;
+        if (column === "provider") {
+          let aCN = a.courseNumber.toLowerCase();
+          let bCN = b.courseNumber.toLowerCase();
+          if (aCN < bCN) return -1;
+          if (aCN > bCN) return 1;
+          return 0;
+        }
+        return 0;
+      });
+    }
+
+    // Add click event listeners to table headers for sorting.
+    document.querySelectorAll("#courseTable th").forEach(header => {
+      header.addEventListener("click", () => {
+        const column = header.getAttribute("data-column");
+        if (sortColumn === column) {
+          sortDir = sortDir === "asc" ? "desc" : "asc";
+        } else {
+          sortColumn = column;
+          sortDir = "asc";
+        }
+        document.querySelectorAll("#courseTable th").forEach(th => {
+          th.classList.remove("sort-asc", "sort-desc");
+        });
+        header.classList.add(sortDir === "asc" ? "sort-asc" : "sort-desc");
+        sortCourses(sortColumn, sortDir);
+        renderTable(filteredCourses);
+      });
+    });
+  </script>
+</body>
+</html>
